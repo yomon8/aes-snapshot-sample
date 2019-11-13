@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Control Snapshots for Amazon Elasticsearch Service
+
+Globals:
+  Function:
+    AutoPublishAlias: live
+    DeploymentPreference:
+      Type: AllAtOnce
+
+Parameters:
+  AESHost:
+    Type: String
+  LambdaSubnetId:
+    Type: String
+  LambdaSecurityGroupId:
+    Type: String
+  SnapshotRepositoryName:
+    Type: String
+  SnapshotPrefix:
+    Type: String
+
+Resources:
+  AESSnapshotS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+
+  AESSnapshotPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - s3:ListBucket
+            Resource:
+              - !Sub ${AESSnapshotS3Bucket.Arn}
+          - Effect: "Allow"
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource:
+              - !Sub ${AESSnapshotS3Bucket.Arn}/*
+
+  AESAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              - es:ESHttpPost
+              - es:ESHttpGet
+              - es:ESHttpPut
+              - es:ESHttpDelete
+            Resource:
+              - "*"
+          - Effect: "Allow"
+            Action:
+              - iam:PassRole
+            Resource:
+              - !GetAtt AESSnapshotRole.Arn
+
+  AESSnapshotRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: es.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref AESSnapshotPolicy
+
+  AESLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        - !Ref AESAccessPolicy
+
+  AESLibsLayer:
+   Type: AWS::Serverless::LayerVersion
+   Properties:
+     LayerName: aes_libs
+     Description: AES Libs Layer
+     ContentUri: layer
+
+  AESRotateSnapshotFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: rotate_snapshot
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      MemorySize: 128
+      Timeout: 180
+      Environment:
+        Variables:
+          AES_HOST: !Ref AESHost
+          REGION: !Ref AWS::Region
+          SNAPSHOT_REPO_NAME: !Ref SnapshotRepositoryName
+          SNAPSHOT_PREFIX: !Ref SnapshotPrefix
+      Role: !GetAtt AESLambdaRole.Arn
+      VpcConfig:
+        SubnetIds:
+          - !Ref LambdaSubnetId
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+      Layers:
+        - !Ref AESLibsLayer
+      Events:
+        Rule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(5 16 * * ? *)
+
+  AESRegistSnapshotRepositoryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: regist_snapshot_repository
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      MemorySize: 128
+      Timeout: 30
+      Environment:
+        Variables:
+          AES_HOST: !Ref AESHost
+          REGION: !Ref AWS::Region
+          SNAPSHOT_REPO_NAME: !Ref SnapshotRepositoryName
+          SNAPSHOT_BUCKET: !Ref AESSnapshotS3Bucket
+          SNAPSHOT_ROLE_ARN: !GetAtt AESSnapshotRole.Arn
+      Role: !GetAtt AESLambdaRole.Arn
+      VpcConfig:
+        SubnetIds:
+          - !Ref LambdaSubnetId
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+      Layers:
+        - !Ref AESLibsLayer
+
+Outputs:
+  RegistSnapshotFunctionName:
+    Value: !Ref AESRegistSnapshotRepositoryFunction
+  RotateSnapshotFunctionName:
+    Value: !Ref AESRotateSnapshotFunction

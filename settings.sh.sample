@@ -1,0 +1,21 @@
+# CloudformationのStack名
+readonly STACK_NAME=aes-snapshot-sample
+
+# Cloudformationのパッケージをアップロードするバケット
+readonly STACK_S3_BUCKET=your-bucket-name
+readonly STACK_S3_PREFIX=aes-snapshot-sample
+
+# AESのホスト名（AESはVPCアクセスを前提に作ってます)
+readonly AES_HOST=vpc-xxxxxxxxxxxxxxxxxxxxxx.ap-northeast-1.es.amazonaws.com
+
+# AESにアクセス可能なSubnetを指定
+readonly LAMBDA_SUBNET_ID=subnet-xxxxxxxxxxxxxxxxxxxxxx
+
+# AESにアクセス可能なSGを指定
+readonly LAMBDA_SECURITY_GROUP_ID=sg-xxxxxxxxxxxxxxxxxxx
+
+# AESのスナップショットの保管先の名前
+readonly SNAPSHOT_REPOSITORY_NAME=your-snapshot-repo-name
+
+# AESのスナップショットの名前のPrefix
+readonly SNAPSHOT_PREFIX=your-snapshot-prefix
